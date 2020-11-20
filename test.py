@@ -1,6 +1,7 @@
 import argparse
 from pathlib import Path
 
+import cv2
 import torch
 import torch.nn as nn
 from PIL import Image
@@ -9,6 +10,7 @@ from torchvision.utils import save_image
 
 import net
 from function import adaptive_instance_normalization, coral
+from mask_gen import load_mask_gen, generate_mask_dictionary, show_mask
 
 
 def test_transform(size, crop):
@@ -23,7 +25,7 @@ def test_transform(size, crop):
 
 
 def style_transfer(vgg, decoder, content, style, alpha=1.0,
-                   interpolation_weights=None, mask=None):
+                   interpolation_weights=None, mask=None, semantic_mask=None):
     assert (0.0 <= alpha <= 1.0)
     content_f = vgg(content)
     style_f = vgg(style)
@@ -52,6 +54,29 @@ def style_transfer(vgg, decoder, content, style, alpha=1.0,
         for i, w in enumerate(interpolation_weights):
             feat = feat + w * base_feat[i:i + 1]
         content_f = content_f[0:1]
+    elif semantic_mask:
+        assert style_f.size()[0] == len(semantic_mask)
+        _, C, H, W = content_f.size()
+        cfg, predictor = load_mask_gen()
+        # TODO: Change the image format/lib later
+        img = cv2.imread(args.content)
+        outputs = predictor(img)
+        # print(outputs)
+        class_mask_dict = generate_mask_dictionary(cfg, outputs, img)
+        content_f_view = content_f.view(C, -1)
+        # show_mask(class_mask_dict)
+        feat = content_f_view.clone().zero_()
+        for i in range(len(semantic_mask)):
+            mask = class_mask_dict[semantic_mask[i]][0]
+            mask = Image.fromarray(mask.astype('uint8'), 'RGB')
+            style_f_cur = style_f[i].unsqueeze(0)
+            mask = test_transform((H, W), None)(mask)[0]
+            mask_view = mask.view(-1)
+            mask = torch.LongTensor((mask_view==1).nonzero(as_tuple=True)[0]).to(device)
+            content_f_cur = content_f_view.index_select(1, mask).view(1, C, mask.nelement(), 1)
+            target_f_cur = adaptive_instance_normalization(content_f_cur, style_f_cur).squeeze()
+            feat.index_copy_(1, mask, target_f_cur)
+        feat = feat.view_as(content_f)
     else:
         feat = adaptive_instance_normalization(content_f, style_f)
     feat = feat * alpha + content_f * (1 - alpha)
@@ -98,6 +123,8 @@ parser.add_argument(
     help='The weight for blending the style of multiple style images')
 parser.add_argument('--mask', type=str, default='',
     help='Mask to apply spatial control, assume to be the path to a binary mask of the same size as content image')
+parser.add_argument('--semantic_mask', type=str, default='',
+    help='Semantic mask to apply spatial control')
 
 args = parser.parse_args()
 
@@ -134,6 +161,10 @@ if args.style_interpolation_weights:
 mask = None
 if args.mask:
     mask = Image.open(str(args.mask))
+
+semantic_mask = None
+if args.semantic_mask:
+    semantic_mask = args.semantic_mask.split(',')
 
 decoder = net.decoder
 vgg = net.vgg
@@ -177,7 +208,18 @@ for content_path in content_paths:
         output_name = output_dir / '{:s}_interpolation{:s}'.format(
             content_path.stem, args.save_ext)
         save_image(output, str(output_name))
-
+    elif semantic_mask:
+        style = torch.stack([style_tf(Image.open(str(p))) for p in style_paths])
+        content = content_tf(Image.open(str(content_path)))
+        style = style.to(device)
+        content = content.to(device).unsqueeze(0)
+        with torch.no_grad():
+            output = style_transfer(vgg, decoder, content, style,
+                                    args.alpha, semantic_mask=semantic_mask)
+        output = output.cpu()
+        output_name = output_dir / '{:s}_semantic_mask{:s}'.format(
+            content_path.stem, args.save_ext)
+        save_image(output, str(output_name))
     else:  # process one content and one style
         for style_path in style_paths:
             content = content_tf(Image.open(str(content_path)))
