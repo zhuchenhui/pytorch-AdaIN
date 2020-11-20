@@ -38,6 +38,11 @@ This is an example of mixing four styles by specifying `--style` and `--style_in
 CUDA_VISIBLE_DEVICES=<gpu_id> python test.py --content input/content/avril.jpg --style input/style/picasso_self_portrait.jpg,input/style/impronte_d_artista.jpg,input/style/trial.jpg,input/style/antimonocromatismo.jpg --style_interpolation_weights 1,1,1,1 --content_size 512 --style_size 512 --crop
 ```
 
+This is an example of spatial control by specifying `--style` and `--mask` option.
+```
+CUDA_VISIBLE_DEVICES=0 python3 test.py --content input/content/blonde_girl.jpg --style input/style/woman_in_peasant_dress_cropped.jpg,input/style/mondrian_cropped.jpg --mask input/mask/mask.png --content_size 0 --style_size 0
+```
+
 Some other options:
 * `--content_size`: New (minimum) size for the content image. Keeping the original size if set to 0.
 * `--style_size`: New (minimum) size for the content image. Keeping the original size if set to 0.

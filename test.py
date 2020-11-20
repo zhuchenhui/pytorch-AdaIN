@@ -27,7 +27,7 @@ def style_transfer(vgg, decoder, content, style, alpha=1.0,
     assert (0.0 <= alpha <= 1.0)
     content_f = vgg(content)
     style_f = vgg(style)
-    if mask is not None:
+    if mask:
         assert style_f.size()[0] == 2 # expect two style images
         style_f_fg = style_f[0].unsqueeze(0)
         style_f_bg = style_f[1].unsqueeze(0)
